@@ -11,7 +11,7 @@
 // @originalAuthor Mustex/Bunta
 // @modifiedBy NW gateway Professions Bot Developers & Contributors
 
-// @version 4.4
+// @version 4.4.1
 // @license http://creativecommons.org/licenses/by-nc-sa/3.0/us/
 // @grant GM_getValue
 // @grant GM_setValue
@@ -37,6 +37,8 @@ Developers & Contributors
 - WloBeb
 
 RELEASE NOTES
+4.4.1
+- Fixed Black Ice Shaping
 4.4
 - Added leadership manual mode
 - Now vendors all unstable potions
@@ -727,9 +729,9 @@ function addProfile(profession, profile, base){
         }]
     };
 
-    definedTask["BlackIce"] = {
-        taskListName: "BlackIce",
-        taskName: "BlackIce",
+    definedTask["Blackice"] = {
+        taskListName: "Blackice",
+        taskName: "Blackice",
         taskDefaultPriority: 1,
         taskDefaultSlotNum: 0,
         taskActive: true,
@@ -1813,7 +1815,7 @@ function addProfile(profession, profile, base){
         definedTask["Platesmithing"],
         definedTask["Leatherworking"],
         definedTask["Tailoring"],
-        definedTask["BlackIce"],
+        definedTask["Blackice"],
         definedTask["WinterEvent"],
         definedTask["SiegeEvent"],
         definedTask["SummerEvent"],
@@ -1946,6 +1948,7 @@ function addProfile(profession, profile, base){
             scriptDelayFactor: 1,
             maxCollectTaskAttempts: 2,
             defaultVisitTime: 1*60*60*1000,   // 1 hour default
+            unasignedSlotRecheck: 0.5*60*60*1000,   // 0.5 hour default
             leadershipTaskTimeout: 5*60*1000, // 5 minutes default
             leadershipTaskTimeoutRearm: 1*60*1000, // 1 minutes default
         }
@@ -2168,6 +2171,8 @@ function addProfile(profession, profile, base){
             opts: [ { name: '1',  value: 1},  { name: '2',  value: 2},  { name: '3',  value: 3}], },
         {scope: 'script', group: 'general', name: 'defaultVisitTime', title: 'Default process re-process time for all empty slots (in hours)',   type: 'select', pane: 'main', tooltip: 'Default process re-process time for all empty slots',
             opts: defaultVisitTimeOpts, },
+        {scope: 'script', group: 'general', name: 'unasignedSlotRecheck', title: 'Recheck unasigned slots every: (in hours)',   type: 'select', pane: 'main', tooltip: 'If the char has unasigned slot the script will recheck if the user set it manually',
+            opts: [ { name: "don\'t check",  value: 0},  { name: '0.5',  value: 0.5*60*60*1000},  { name: '1',  value: 1*60*60*1000},  { name: '2',  value: 2*60*60*1000},  { name: '3',  value: 3*60*60*1000},  { name: '4',  value: 4*60*60*1000}], },
 
         {scope: 'script', group: 'general', name: 'leadershipTaskTimeout', title: 'Timeout in manual leadership mode (in minutes)',   type: 'select', pane: 'manual', 
             tooltip: 'In manual leadership mode the script will wait this long for you to manually assign a leadership task',
@@ -2612,19 +2617,31 @@ function addProfile(profession, profile, base){
     function getNextFinishedTask() {
         var tmpNext,
             next = null;
+        var foundTask = false;
         unsafeWindow.client.dataModel.model.ent.main.itemassignments.assignments.forEach(function(entry, idx) {
             if (entry.uassignmentid && (collectTaskAttempts[idx] < scriptSettings.general.maxCollectTaskAttempts)) {
+                foundTask = true;
                 tmpNext = new Date(entry.ufinishdate);
                 if (!next || tmpNext < next) {
                     next = tmpNext;
                 }
             }
+            if (!entry.islockedslot && entry.category == "None" && scriptSettings.general.unasignedSlotRecheck) {
+                var tdate = new Date();
+                tdate.setTime( tdate.getTime() + parseInt(scriptSettings.general.unasignedSlotRecheck));
+                console.log("Found unasigned slot, setting it as: ", tdate);
+                if (!next || tdate < next) {
+                    next = tdate;
+                }
+                
+            }
+                
         });
-        if (next) {
+        if (next && foundTask) {
             console.log("Next finished task at " + next.toLocaleString());
         } 
         else {
-            console.log("No next finishing date found!!");
+            console.log("No next finishing date found! All slots unasigned.");
             if (scriptSettings.general.defaultVisitTime) {
                 var tdate = new Date();
                 tdate.setTime( tdate.getTime() + parseInt(scriptSettings.general.defaultVisitTime));
@@ -2653,14 +2670,15 @@ function addProfile(profession, profile, base){
         }
 
         // Check level
-        var level = unsafeWindow.client.dataModel.model.ent.main.itemassignmentcategories.categories.filter(function(entry) {
+        var category = unsafeWindow.client.dataModel.model.ent.main.itemassignmentcategories.categories.filter(function(entry) {
             return entry.name == prof.taskName;
-        })[0].currentrank;
+        });
+        var level = category ? category[0].currentrank : 0;
         var list = profile.level[level];
         
         var taskBlocked = ((getSetting('professionSettings','stopNotLeadership') == 20 && prof.taskName != 'Leadership' && level >= 20) || 
             (getSetting('professionSettings','stopNotLeadership') == 25 && prof.taskName != 'Leadership' && level >= 25) ||
-            (getSetting('professionSettings','stopAlchemyAt3') && prof.taskName == 'Alchemy' && level > 3));
+            (getSetting('professionSettings','stopAlchemyAt3') && prof.taskName == 'Alchemy' && level > 3)) || !category;
         
         if(list.length <= i || taskBlocked) {
             if (!taskBlocked) console.log("Task list exhausted for ", prof.taskListName, " at level ", level, " profile: ", profile.profileName);
@@ -5367,7 +5385,7 @@ function addProfile(profession, profile, base){
         html += "<div style='margin: 5px 0;'> Last SCA reset (test #2): " + (new Date(lastDailyResetTime)).toLocaleString() + "</div>";
         $('#sca_v').html(html);
         $('#sca_v').append("<br /><br /><button id='settings_sca'>Cycle SCA</button>");
-        $('#sca_v').append("<br /><br /><button id='reset_all_char_times_btn'>Reset All Visit Tiems</button>");
+        $('#sca_v').append("&nbsp;&nbsp;<button id='reset_all_char_times_btn'>Reset All Visit Times</button>");
         
         $('#settings_sca').button();
         $("#settings_sca").click(function() {
